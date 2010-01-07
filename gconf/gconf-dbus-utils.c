@@ -417,6 +417,9 @@ utils_append_schema (DBusMessageIter   *main_iter,
   s = gconf_schema_get_owner (schema);
   utils_append_optional_string (&struct_iter, s);
 
+  s = gconf_schema_get_gettext_domain (schema);
+  utils_append_optional_string (&struct_iter, s);
+
   default_value = gconf_schema_get_default_value (schema);
 
   /* We don't need to do this, but it's much simpler */
@@ -940,7 +943,7 @@ utils_get_schema (DBusMessageIter *main_iter)
 {
   DBusMessageIter  struct_iter;
   gint32           type, list_type, car_type, cdr_type;
-  const gchar     *locale, *short_desc, *long_desc, *owner;
+  const gchar     *locale, *short_desc, *long_desc, *owner, *gettext_domain;
   const gchar     *encoded;
   GConfSchema     *schema;
   GConfValue      *default_value;
@@ -972,6 +975,9 @@ utils_get_schema (DBusMessageIter *main_iter)
   owner = utils_get_optional_string (&struct_iter);
 
   dbus_message_iter_next (&struct_iter);
+  gettext_domain = utils_get_optional_string (&struct_iter);
+
+  dbus_message_iter_next (&struct_iter);
   dbus_message_iter_get_basic (&struct_iter, &encoded);
 
   schema = gconf_schema_new ();
@@ -993,6 +999,9 @@ utils_get_schema (DBusMessageIter *main_iter)
   if (owner)
     gconf_schema_set_owner (schema, owner);
 
+  if (gettext_domain)
+    gconf_schema_set_gettext_domain (schema, gettext_domain);
+  
   if (*encoded != '\0')
     {
       default_value = gconf_value_decode (encoded);
