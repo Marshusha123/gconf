@@ -35,9 +35,17 @@
 #include "gconf.h"
 #include "gconfd.h"
 #include "gconf-database.h"
+
+#ifdef HAVE_DBUS
+#include "gconf-database-dbus.h"
+#include "gconfd-dbus.h"
+#endif
+
+#ifdef HAVE_CORBA
 #include <orbit/orbit.h>
 
 #include "GConfX.h"
+#endif
 
 #include <sys/types.h>
 #include <stdio.h>
@@ -121,9 +129,12 @@ safe_g_hash_table_insert(GHashTable* ht, gpointer key, gpointer value)
  */
 
 static void     gconf_main            (void);
+#ifndef HAVE_DBUS
 static void     gconf_main_quit       (void);
+#endif
 static gboolean gconf_main_is_running (void);
 
+#ifdef HAVE_CORBA
 static void logfile_save (void);
 static void logfile_read (void);
 static void log_client_add (const ConfigListener client);
@@ -135,6 +146,7 @@ static GSList *list_clients          (void);
 static void    log_clients_to_string (GString              *str);
 static void    drop_old_clients      (void);
 static guint   client_count          (void);
+#endif
 
 static void    enter_shutdown          (void);
 
@@ -164,6 +176,7 @@ static gboolean in_shutdown = FALSE;
  */
 static gboolean need_db_reload = FALSE;
 
+#ifdef HAVE_CORBA
 /* 
  * CORBA goo
  */
@@ -337,6 +350,7 @@ gconfd_shutdown(PortableServer_Servant servant, CORBA_Environment *ev)
 
   gconf_main_quit();
 }
+#endif /* HAVE_CORBA */
 
 /*
  * Main code
@@ -512,12 +526,15 @@ signal_handler (int signo)
   }
 }
 
+#ifdef HAVE_CORBA
 PortableServer_POA
 gconf_get_poa (void)
 {
   return the_poa;
 }
+#endif
 
+#ifdef HAVE_CORBA
 static const char *
 get_introspection_xml (void)
 {
@@ -635,6 +652,7 @@ get_on_d_bus (void)
 
   return connection;
 }
+#endif
 
 #ifdef ENABLE_DEFAULTS_SERVICE
 /* listen on system bus for defaults changes */
@@ -752,8 +770,12 @@ main(int argc, char** argv)
   sigset_t empty_mask;
   sigset_t full_mask;
 #endif
+
+#ifdef HAVE_CORBA
   CORBA_Environment ev;
   CORBA_ORB orb;
+#endif
+
   gchar* ior;
   int exit_code = 0;
   GError *err;
@@ -871,10 +893,18 @@ main(int argc, char** argv)
 #endif
 #endif
 
+#ifdef HAVE_CORBA
   CORBA_exception_init(&ev);
+#endif
 
   init_databases ();
 
+#ifdef HAVE_DBUS
+  if (!gconfd_dbus_init ())
+    return 1;
+#endif
+
+#ifdef HAVE_CORBA
   orb = gconf_orb_get ();
   
   POA_ConfigServer2__init (&poa_server_servant, &ev);
@@ -907,7 +937,13 @@ main(int argc, char** argv)
        */
       gconf_server_load_sources ();
     }
-  
+#endif
+
+#ifdef HAVE_DBUS
+  gconf_server_load_sources ();
+#endif
+
+#ifdef HAVE_CORBA
   /* notify caller that we're done either getting the lock
    * or not getting it
    */
@@ -932,7 +968,8 @@ main(int argc, char** argv)
 
   /* Read saved log file, if any */
   logfile_read ();
- 
+#endif
+
 #ifdef ENABLE_DEFAULTS_SERVICE 
   get_on_system_bus ();
 #endif
@@ -947,15 +984,18 @@ main(int argc, char** argv)
    */
   enter_shutdown ();
 
+#ifdef HAVE_CORBA
   /* Save current state in logfile (may compress the logfile a good
    * bit)
    */
   logfile_save ();
+#endif
   
   shutdown_databases ();
 
   gconfd_locale_cache_drop ();
 
+#ifdef HAVE_CORBA
   if (daemon_lock)
     {
       err = NULL;
@@ -969,6 +1009,7 @@ main(int argc, char** argv)
     }
 
   daemon_lock = NULL;
+#endif
   
   gconf_log (GCL_DEBUG, _("Exiting"));
 
@@ -991,19 +1032,29 @@ periodic_cleanup_timeout(gpointer data)
       gconf_log (GCL_INFO, _("SIGHUP received, reloading all databases"));
 
       need_db_reload = FALSE;
+#ifdef HAVE_CORBA
       logfile_save ();
+#endif
       shutdown_databases ();
       init_databases ();
       gconf_server_load_sources ();
+#ifdef HAVE_CORBA
       logfile_read ();
+#endif
     }
   
   gconf_log (GCL_DEBUG, "Performing periodic cleanup, expiring cache cruft");
   
+#ifdef HAVE_CORBA
   drop_old_clients ();
+#endif
   drop_old_databases ();
 
+#ifdef HAVE_DBUS
+  if (no_databases_in_use () && gconfd_dbus_client_count () == 0)
+#else
   if (no_databases_in_use () && client_count () == 0)
+#endif
     {
       gconf_log (GCL_INFO, _("GConf server is not in use, shutting down."));
       gconf_main_quit ();
@@ -1013,6 +1064,7 @@ periodic_cleanup_timeout(gpointer data)
   /* expire old locale cache entries */
   gconfd_locale_cache_expire ();
 
+#ifdef HAVE_CORBA
   if (!need_log_cleanup)
     {
       gconf_log (GCL_DEBUG, "No log file saving needed in periodic cleanup handler");
@@ -1021,6 +1073,7 @@ periodic_cleanup_timeout(gpointer data)
   
   /* Compress the running state file */
   logfile_save ();
+#endif
 
   need_log_cleanup = FALSE;
   
@@ -1067,7 +1120,11 @@ gconf_main(void)
   g_main_loop_unref (loop);
 }
 
-static void 
+#ifndef HAVE_DBUS
+static void
+#else
+void
+#endif
 gconf_main_quit(void)
 {
   g_return_if_fail(main_loops != NULL);
@@ -1157,9 +1214,16 @@ lookup_database (GSList *addresses)
   return retval;
 }
 
+#ifdef HAVE_DBUS
+GConfDatabase *
+gconfd_obtain_database (GSList  *addresses,
+			GError **err)
+#else
 static GConfDatabase*
 obtain_database (GSList  *addresses,
                  GError **err)
+#endif
+
 {
   GConfSources* sources;
   GError* error = NULL;
@@ -1314,7 +1378,9 @@ gconfd_notify_other_listeners (GConfDatabase *modified_db,
 	      if (gconf_sources_is_affected (db->sources, modified_source, key))
 		{
 		  GConfValue  *value;
+#ifdef HAVE_CORBA
 		  ConfigValue *cvalue;
+#endif
 		  GError      *error;
 		  gboolean     is_default;
 		  gboolean     is_writable;
@@ -1337,6 +1403,7 @@ gconfd_notify_other_listeners (GConfDatabase *modified_db,
 		      return;
 		    }
 
+#if HAVE_CORBA
 		  if (value != NULL)
 		    {
 		      cvalue = gconf_corba_value_from_gconf_value (value);
@@ -1355,6 +1422,16 @@ gconfd_notify_other_listeners (GConfDatabase *modified_db,
 						   is_writable,
 						   FALSE);
 		  CORBA_free (cvalue);
+#endif
+#ifdef HAVE_DBUS
+		  gconf_database_dbus_notify_listeners (db,
+							NULL,
+							key,
+							value,
+							is_default,
+							is_writable,
+							FALSE);
+#endif
 		}
 
 	      tmp2 = tmp2->next;
@@ -1392,6 +1469,7 @@ enter_shutdown(void)
 }
 
 
+#ifdef HAVE_CORBA
 /* Exceptions */
 
 gboolean
@@ -2709,4 +2787,18 @@ client_count (void)
   else
     return g_hash_table_size (client_table);
 }
+#endif
 
+#ifdef HAVE_DBUS
+static void
+gconf_handle_segv (int signum)
+{
+  return;
+}
+
+gboolean
+gconfd_in_shutdown (void)
+{
+  return in_shutdown;
+}
+#endif

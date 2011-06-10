@@ -6,6 +6,7 @@ INCLUDES=								\
 	-I$(top_srcdir)							\
 	-I$(top_builddir)						\
 	$(DEPENDENT_WITH_XML_AND_GTK_CFLAGS) 				\
+	$(DEPENDENT_DBUS_CFLAGS)				\
 	-DG_LOG_DOMAIN=\"GConf\"					\
 	-DPREFIX=\""$(prefix)"\"					\
 	-DGCONF_LOCALE_DIR=\""$(datadir)/locale"\"			\
@@ -34,7 +35,9 @@ lib_LTLIBRARIES = libgconf-2.la
 bin_PROGRAMS = gconftool-2 
 libexec_PROGRAMS = gconfd-2 $(SANITY_CHECK)
 
+if HAVE_CORBA
 CORBA_SOURCECODE = GConfX-common.c GConfX-skels.c GConfX-stubs.c GConfX.h
+endif
 
 BUILT_SOURCES = 			\
 	$(CORBA_SOURCECODE)		\
@@ -74,6 +77,13 @@ gconfd_2_SOURCES = \
 	gconfd.h		\
 	gconfd.c
 
+if HAVE_DBUS
+gconfd_2_SOURCES += \
+	gconfd-dbus.c \
+	gconfd-dbus.h \
+	gconf-database-dbus.h \
+	gconf-database-dbus.c
+endif
 if OS_WIN32
 gconfd_2_LDFLAGS = -mwindows
 endif
@@ -118,9 +128,16 @@ libgconf_2_la_SOURCES = \
 	$(CORBA_SOURCECODE)	\
 	$(WIN32_SOURCECODE)
 
+#ifdef HAVE_DBUS
+libgconf_2_la_SOURCES += \
+	gconf-dbus.c \
+	gconf-dbus-utils.c \
+	gconf-dbus-utils.h
+#endif
+
 libgconf_2_la_LDFLAGS = -version-info $(GCONF_CURRENT):$(GCONF_REVISION):$(GCONF_AGE) -no-undefined
 
-libgconf_2_la_LIBADD = $(INTLLIBS) $(DEPENDENT_LIBS)
+libgconf_2_la_LIBADD = $(INTLLIBS) $(DEPENDENT_LIBS) $(DEPENDENT_DBUS_LIBS)
 
 -include $(INTROSPECTION_MAKEFILE)
 INTROSPECTION_GIRS =

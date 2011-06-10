@@ -35,6 +35,7 @@ typedef struct {
   gchar* owner;        /* Name of creating application */
   gchar* short_desc;   /* 40 char or less description, no newlines */
   gchar* long_desc;    /* could be a paragraph or so */
+  const gchar* gettext_domain; /* description gettext domain */
   GConfValue* default_value; /* Default value of the key */
 } GConfRealSchema;
 
@@ -135,6 +136,19 @@ gconf_schema_set_locale (GConfSchema* sc, const gchar* locale)
   else 
     REAL_SCHEMA (sc)->locale = NULL;
 }
+
+#if HAVE_DBUS
+void
+gconf_schema_set_gettext_domain (GConfSchema* sc, const gchar* domain)
+{
+  g_return_if_fail (domain == NULL || g_utf8_validate (domain, -1, NULL));
+  
+  if (domain)
+    REAL_SCHEMA (sc)->gettext_domain = g_intern_string (domain);
+  else 
+    REAL_SCHEMA (sc)->gettext_domain = NULL;
+}
+#endif
 
 void          
 gconf_schema_set_short_desc (GConfSchema* sc, const gchar* desc)
@@ -297,6 +311,16 @@ gconf_schema_get_locale (const GConfSchema *schema)
 
   return REAL_SCHEMA (schema)->locale;
 }
+
+#ifdef HAVE_DBUS
+const char*
+gconf_schema_get_gettext_domain (const GConfSchema *schema)
+{
+  g_return_val_if_fail (schema != NULL, NULL);
+
+  return REAL_SCHEMA (schema)->gettext_domain;
+}
+#endif
 
 const char*
 gconf_schema_get_short_desc (const GConfSchema *schema)

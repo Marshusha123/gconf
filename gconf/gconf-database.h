@@ -25,21 +25,40 @@
 G_BEGIN_DECLS
 
 #include "gconf-error.h"
+#ifdef HAVE_CORBA
 #include "GConfX.h"
+#endif
 #include "gconf-listeners.h"
 #include "gconf-sources.h"
 #include "gconf-internals.h"
+
+#ifdef HAVE_DBUS
+#include "gconf-locale.h"
+#include <dbus/dbus.h>
+#endif
 
 typedef struct _GConfDatabase GConfDatabase;
 
 struct _GConfDatabase
 {
+#ifdef HAVE_CORBA
   /* "inherit" from the servant,
      must be first in struct */
   POA_ConfigDatabase3 servant;
 
   ConfigDatabase objref;
+#endif
+
+#ifdef HAVE_DBUS
+  /* D-Bus specific parts: */
+  char           *object_path;
   
+  /* Information about clients that want notification. */
+  GHashTable     *notifications;
+  GHashTable     *listening_clients;
+  /* End of D-Bus stuff. */
+#endif
+	
   GConfListeners* listeners;
   GConfSources* sources;
 
@@ -55,6 +74,7 @@ void           gconf_database_free (GConfDatabase *db);
 
 void                gconf_database_drop_dead_listeners (GConfDatabase *db);
 
+#ifdef HAVE_CORBA
 CORBA_unsigned_long gconf_database_add_listener     (GConfDatabase       *db,
                                                      ConfigListener       who,
                                                      const char          *name,
@@ -74,6 +94,7 @@ void                gconf_database_notify_listeners (GConfDatabase       *db,
                                                      gboolean             is_default,
                                                      gboolean             is_writable,
                                                      gboolean             notify_others);
+#endif
 
 GConfValue* gconf_database_query_value         (GConfDatabase  *db,
                                                 const gchar    *key,
@@ -94,7 +115,9 @@ GConfValue* gconf_database_query_default_value (GConfDatabase  *db,
 void gconf_database_set   (GConfDatabase      *db,
                            const gchar        *key,
                            GConfValue         *value,
+#ifdef HAVE_CORBA
                            const ConfigValue  *cvalue,
+#endif
                            GError        **err);
 void gconf_database_unset (GConfDatabase      *db,
                            const gchar        *key,
@@ -137,15 +160,20 @@ void     gconf_database_clear_cache_for_sources (GConfDatabase  *db,
 						 GConfSources   *sources,
 						 GError        **err);
 
+#ifdef HAVE_DBUS
+GConfLocaleList* gconfd_locale_cache_lookup(const gchar* locale);
+#endif
 
 void gconfd_locale_cache_expire (void);
 void gconfd_locale_cache_drop  (void);
 
 const gchar* gconf_database_get_persistent_name (GConfDatabase *db);
 
+#ifdef HAVE_CORBA
 void gconf_database_log_listeners_to_string (GConfDatabase *db,
                                              gboolean is_default,
                                              GString *str);
+#endif
 
 G_END_DECLS
 

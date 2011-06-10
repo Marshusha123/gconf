@@ -19,10 +19,16 @@
 
 #include <config.h>
 #include "gconf-database.h"
+#ifdef HAVE_DBUS
+#include "gconf-database-dbus.h"
+#endif
 #include "gconf-listeners.h"
 #include "gconf-sources.h"
 #include "gconf-locale.h"
 #include "gconfd.h"
+#ifdef HAVE_DBUS
+#include "gconfd-dbus.h"
+#endif
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
@@ -32,8 +38,7 @@
  * Forward decls
  */
 
-static GConfLocaleList* locale_cache_lookup(const gchar* locale);
-
+#ifdef HAVE_CORBA
 typedef struct _Listener Listener;
 
 struct _Listener {
@@ -779,6 +784,8 @@ static POA_ConfigDatabase3__epv server3_epv = {
 
 static POA_ConfigDatabase3__vepv poa_server_vepv = { &base_epv, &server_epv, &server2_epv, &server3_epv };
 
+#endif /* HAVE_CORBA */
+
 static void gconf_database_really_sync (GConfDatabase *db);
 static void source_notify_cb           (GConfSource   *source,
 					const gchar   *location,
@@ -788,10 +795,13 @@ GConfDatabase*
 gconf_database_new (GConfSources  *sources)
 {
   GConfDatabase* db;
+#ifdef HAVE_CORBA
   CORBA_Environment ev;
+#endif
   
   db = g_new0 (GConfDatabase, 1);
 
+#ifdef HAVE_CORBA
   db->servant._private = NULL;
   db->servant.vepv = &poa_server_vepv;
 
@@ -809,6 +819,9 @@ gconf_database_new (GConfSources  *sources)
 
       exit (1);
     }
+#endif
+
+  gconf_database_dbus_setup (db);
 
   db->listeners = gconf_listeners_new();
 
@@ -831,6 +844,7 @@ gconf_database_new (GConfSources  *sources)
 void
 gconf_database_free (GConfDatabase *db)
 {
+#ifdef HAVE_CORBA
   PortableServer_ObjectId *oid;
   CORBA_Environment ev;
 
@@ -853,7 +867,12 @@ gconf_database_free (GConfDatabase *db)
   CORBA_free (oid);
 
   CORBA_exception_free (&ev);
-  
+#endif
+
+#ifdef HAVE_DBUS
+  gconf_database_dbus_teardown (db);
+#endif
+
   if (db->listeners != NULL)
     {
       gboolean need_sync = FALSE;
@@ -886,6 +905,7 @@ gconf_database_free (GConfDatabase *db)
   g_free (db);
 }
   
+#ifdef HAVE_CORBA
 static gboolean
 client_alive_predicate (const gchar* location,
                         guint        cnxn_id,
@@ -915,16 +935,19 @@ client_alive_predicate (const gchar* location,
   
   return result;
 }
+#endif
 
 void
 gconf_database_drop_dead_listeners (GConfDatabase *db)
 {
+#ifdef HAVE_CORBA
   if (db->listeners)
     {
       gconf_listeners_remove_if (db->listeners,
                                  client_alive_predicate,
                                  NULL);
     }
+#endif
 }
 
 static gint
@@ -1025,7 +1048,9 @@ source_notify_cb (GConfSource   *source,
   if (gconf_sources_is_affected (db->sources, source, location))
     {
       GConfValue  *value;
+#ifdef HAVE_CORBA
       ConfigValue *cvalue;
+#endif
       GError      *error;
       gboolean     is_default;
       gboolean     is_writable;
@@ -1052,6 +1077,7 @@ source_notify_cb (GConfSource   *source,
 	  return;
 	}
 
+#ifdef HAVE_CORBA
       cvalue = gconf_corba_value_from_gconf_value (value);
       gconf_database_notify_listeners (db,
 				       NULL,
@@ -1061,10 +1087,22 @@ source_notify_cb (GConfSource   *source,
 				       is_writable,
 				       FALSE);
       CORBA_free (cvalue);
+#endif
+
+#ifdef HAVE_DBUS
+      gconf_database_dbus_notify_listeners (db,
+					    NULL,
+					    location,
+					    value,
+					    is_default,
+					    is_writable,
+					    FALSE);
+#endif
       gconf_value_free (value);
     }
 }
 
+#ifdef HAVE_CORBA
 CORBA_unsigned_long
 gconf_database_readd_listener   (GConfDatabase       *db,
                                  ConfigListener       who,
@@ -1271,6 +1309,7 @@ gconf_database_notify_listeners (GConfDatabase       *db,
       g_free (modified_sources);
     }
 }
+#endif
 
 GConfValue*
 gconf_database_query_value (GConfDatabase  *db,
@@ -1326,7 +1365,9 @@ void
 gconf_database_set   (GConfDatabase      *db,
                       const gchar        *key,
                       GConfValue         *value,
+#ifdef HAVE_CORBA
                       const ConfigValue  *cvalue,
+#endif
                       GError        **err)
 {
   GError *error = NULL;
@@ -1362,6 +1403,7 @@ gconf_database_set   (GConfDatabase      *db,
       /* Can't possibly be the default, since we just set it,
        * and must be writable since setting it succeeded.
        */
+#ifdef HAVE_CORBA
       gconf_database_notify_listeners (db,
 				       modified_sources,
 				       key,
@@ -1369,6 +1411,16 @@ gconf_database_set   (GConfDatabase      *db,
                                        FALSE,
 				       TRUE,
 				       TRUE);
+#endif
+#ifdef HAVE_DBUS
+      gconf_database_dbus_notify_listeners (db,
+					    modified_sources,
+					    key,
+					    value,
+					    FALSE,
+					    TRUE,
+					    TRUE);
+#endif
     }
 }
 
@@ -1378,7 +1430,9 @@ gconf_database_unset (GConfDatabase      *db,
                       const gchar        *locale,
                       GError        **err)
 {
+#ifdef HAVE_CORBA
   ConfigValue* val;
+#endif
   GError* error = NULL;
   GConfSources *modified_sources = NULL;
   
@@ -1428,6 +1482,7 @@ gconf_database_unset (GConfDatabase      *db,
         gconf_log(GCL_ERR, _("Error getting default value for `%s': %s"),
                   key, (*err)->message);
 
+#ifdef HAVE_CORBA
       if (def_value != NULL)
         {
           val = gconf_corba_value_from_gconf_value(def_value);
@@ -1448,6 +1503,21 @@ gconf_database_unset (GConfDatabase      *db,
 				      is_writable,
 				      TRUE);
       CORBA_free(val);
+#endif
+
+#ifdef HAVE_DBUS
+      gconf_database_schedule_sync(db);
+
+      gconf_database_dbus_notify_listeners(db,
+					   modified_sources,
+					   key,
+					   def_value,
+					   TRUE,
+					   is_writable,
+					   TRUE);
+      if (def_value)
+	      gconf_value_free(def_value);
+#endif
     }
 }
 
@@ -1458,7 +1528,9 @@ gconf_database_recursive_unset (GConfDatabase      *db,
                                 GConfUnsetFlags     flags,
                                 GError            **err)
 {
+#ifdef HAVE_CORBA
   ConfigValue* val;
+#endif
   GError* error = NULL;
   GSList *notifies;
   GSList *tmp;
@@ -1519,7 +1591,8 @@ gconf_database_recursive_unset (GConfDatabase      *db,
 	  g_propagate_error (err, error);
 	  error = NULL;
 	}
-      
+
+#ifdef HAVE_CORBA
       if (new_value != NULL)
         {
           val = gconf_corba_value_from_gconf_value (new_value);
@@ -1541,6 +1614,21 @@ gconf_database_recursive_unset (GConfDatabase      *db,
 				       TRUE);
       
       CORBA_free (val);
+#endif
+#ifdef HAVE_DBUS
+      gconf_database_schedule_sync (db);
+      
+      gconf_database_dbus_notify_listeners (db,
+					    notify->modified_sources,
+					    notify->key,
+					    new_value,
+					    is_default,
+					    is_writable,
+					    TRUE);
+      if (new_value)
+	      gconf_value_free (new_value);
+#endif
+
       g_free (notify->key);
       g_free (notify);
       
@@ -1775,6 +1863,7 @@ gconf_database_get_persistent_name (GConfDatabase *db)
   return db->persistent_name;
 }
 
+#ifdef HAVE_CORBA
 struct ForeachData
 {
   GString *str;
@@ -1848,6 +1937,7 @@ gconf_database_log_listeners_to_string (GConfDatabase *db,
 
   g_free (fd.db_name);
 }
+#endif
 
 /*
  * Locale hash
@@ -1855,8 +1945,8 @@ gconf_database_log_listeners_to_string (GConfDatabase *db,
 
 static GConfLocaleCache* locale_cache = NULL;
 
-static GConfLocaleList*
-locale_cache_lookup(const gchar* locale)
+GConfLocaleList*
+gconfd_locale_cache_lookup(const gchar* locale)
 {
   GConfLocaleList* locale_list;
   
@@ -1888,6 +1978,7 @@ gconfd_locale_cache_drop(void)
     }
 }
 
+#ifdef HAVE_CORBA
 /*
  * The listener object
  */
@@ -1919,6 +2010,7 @@ listener_destroy (Listener* l)
   g_free (l->name);
   g_free (l);
 }
+#endif
 
 
 
